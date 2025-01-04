@@ -507,6 +507,7 @@ class Custom_Metrics(Metric):
         self.target_loss += target_loss * n_samples
         self.concepts_loss += concepts_loss * n_samples
         self.total_loss += total_loss * n_samples
+        # This is an error
         self.y_true.append(y_true)
         self.y_pred_logits.append(y_pred_logits.detach())
         self.c_true.append(c_true)
@@ -516,28 +517,29 @@ class Custom_Metrics(Metric):
         if prec_loss:
             self.prec_loss += prec_loss * n_samples
 
+    # This function is changing state and returning... It is changing the type of y_true etc
     def compute(self, validation=False, config=None):
-        self.y_true = torch.cat(self.y_true, dim=0).cpu()
-        self.c_true = torch.cat(self.c_true, dim=0).cpu()
-        self.c_pred_probs = torch.cat(self.c_pred_probs, dim=0).cpu()
-        self.y_pred_logits = torch.cat(self.y_pred_logits, dim=0).cpu()
-        self.c_true = self.c_true.cpu().numpy()
-        self.c_pred_probs = self.c_pred_probs.cpu().numpy()
-        c_pred = self.c_pred_probs > 0.5
-        if self.y_pred_logits.size(1) == 1:
-            y_pred_probs = nn.Sigmoid()(self.y_pred_logits.squeeze())
+        y_true = torch.cat(self.y_true, dim=0).cpu()
+        c_true = torch.cat(self.c_true, dim=0).cpu()
+        c_pred_probs = torch.cat(self.c_pred_probs, dim=0).cpu()
+        y_pred_logits = torch.cat(self.y_pred_logits, dim=0).cpu()
+        c_true = c_true.cpu().numpy()
+        c_pred_probs = c_pred_probs.cpu().numpy()
+        c_pred = c_pred_probs > 0.5
+        if y_pred_logits.size(1) == 1:
+            y_pred_probs = nn.Sigmoid()(y_pred_logits.squeeze())
             y_pred = y_pred_probs > 0.5
         else:
-            y_pred_probs = nn.Softmax(dim=1)(self.y_pred_logits)
-            y_pred = self.y_pred_logits.argmax(dim=-1)
+            y_pred_probs = nn.Softmax(dim=1)(y_pred_logits)
+            y_pred = y_pred_logits.argmax(dim=-1)
 
-        target_acc = (self.y_true == y_pred).sum() / self.n_samples
-        concept_acc = (self.c_true == c_pred).sum() / (self.n_samples * self.n_concepts)
+        target_acc = (y_true == y_pred).sum() / self.n_samples
+        concept_acc = (c_true == c_pred).sum() / (self.n_samples * self.n_concepts)
         complete_concept_acc = (
-            (self.c_true == c_pred).sum(1) == self.n_concepts
+            (c_true == c_pred).sum(1) == self.n_concepts
         ).sum() / self.n_samples
-        target_jaccard = jaccard_score(self.y_true, y_pred, average="micro")
-        concept_jaccard = jaccard_score(self.c_true, c_pred, average="micro")
+        target_jaccard = jaccard_score(y_true, y_pred, average="micro")
+        concept_jaccard = jaccard_score(c_true, c_pred, average="micro")
         metrics = dict(
             {
                 "target_loss": self.target_loss / self.n_samples,
@@ -556,22 +558,25 @@ class Custom_Metrics(Metric):
             metrics = metrics | {"covariance_norm": self.cov_norm / self.n_samples}
 
         if validation is True:
-            c_pred_probs = []
+            c_pred_probs_list = []
             for j in range(self.n_concepts):
-                c_pred_probs.append(
+                #print("j = %s" % j)
+                c_pred_probs_list.append(
                     np.hstack(
                         (
-                            np.expand_dims(1 - self.c_pred_probs[:, j], 1),
-                            np.expand_dims(self.c_pred_probs[:, j], 1),
+                            np.expand_dims(1 - c_pred_probs[:, j], 1),
+                            np.expand_dims(c_pred_probs[:, j], 1),
                         )
                     )
                 )
 
             y_metrics = calc_target_metrics(
-                self.y_true.numpy(), y_pred_probs.numpy(), config.data
+                y_true.numpy(), y_pred_probs.numpy(), config.data
             )
+            # Should this be c_pred_probs or c_pred_probs_list?
+            # Looks like the list because of the error
             c_metrics, c_metrics_per_concept = calc_concept_metrics(
-                self.c_true, c_pred_probs, config.data
+                c_true, c_pred_probs_list, config.data
             )
             metrics = (
                 metrics

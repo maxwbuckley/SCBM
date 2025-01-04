@@ -174,7 +174,7 @@ def get_concept_groups(config):
     if config.dataset == "CUB":
         # Oracle grouping based on concept type for CUB
         with open(
-            os.path.join(config.data_path, "CUB/CUB_200_2011/concept_names.txt"),
+            os.path.join(config.data_path, "CUB/CUB_200_2011/attributes.txt"),
             "r",
         ) as f:
             concept_names = []

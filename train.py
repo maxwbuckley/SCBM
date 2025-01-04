@@ -135,7 +135,7 @@ def train(config):
     loss_fn = create_loss(config)
 
     metrics = Custom_Metrics(config.data.num_concepts, device).to(device)
-
+    print(metrics)
     # ---------------------------------
     #            Training
     # ---------------------------------

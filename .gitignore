@@ -166,3 +166,9 @@ experiments/
 outputs/
 .vscode/
 multirun/
+
+datasets/CUB/*
+
+.DS_Store
+**/.DS_Store
+
