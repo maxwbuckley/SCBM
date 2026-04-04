@@ -26,54 +26,44 @@ class CUB_GPU_Dataset:
     """
     Loads the entire CUB split into GPU memory at init time.
 
-    Images are stored as uint8 tensors (CHW) padded to max dimensions.
+    All images are resized to a uniform resolution (LOAD_RESOLUTION x LOAD_RESOLUTION)
+    and stored as uint8 tensors (N, C, H, W) on GPU. This enables batched transforms
+    without any per-image Python loops.
+
     Labels and concepts are stored as GPU tensors.
-    Transforms are torchvision v2 and run on-device.
+    Transforms are torchvision v2 and run on the full batch on-device.
     """
+
+    LOAD_RESOLUTION = 500  # Pre-resize all images to this uniform size
 
     def __init__(self, data_pkl, transform, device):
         self.transform = transform
         self.device = device
         self.num_samples = len(data_pkl)
+        res = self.LOAD_RESOLUTION
 
-        # First pass: load all images and find max dimensions
-        print(f"  Loading {self.num_samples} images from disk...")
-        pil_images = []
+        # Pre-resize transform (runs on CPU during loading)
+        pil_resize = Image.Resampling.BILINEAR
+
+        # Load all images, resize to uniform size, convert to tensor
+        print(f"  Loading {self.num_samples} images from disk (resizing to {res}x{res})...")
+        self.images = torch.zeros(
+            (self.num_samples, 3, res, res), dtype=torch.uint8, device=device
+        )
         labels = []
         concepts = []
-        max_h, max_w = 0, 0
 
-        for item in data_pkl:
+        for i, item in enumerate(data_pkl):
             img = Image.open(item["img_path"]).convert("RGB")
-            w, h = img.size
-            max_h = max(max_h, h)
-            max_w = max(max_w, w)
-            # Convert to tensor immediately, skip PIL for future use
+            img = img.resize((res, res), pil_resize)
             img_tensor = torch.from_numpy(np.array(img)).permute(2, 0, 1)  # HWC -> CHW uint8
-            pil_images.append((img_tensor, h, w))
+            self.images[i] = img_tensor.to(device)
             labels.append(item["class_label"])
             concepts.append(np.array(item["attribute_label"], dtype=np.float32))
-
-        # Allocate GPU tensors
-        print(f"  Allocating GPU memory ({max_h}x{max_w} max dims)...")
-        self.images = torch.zeros(
-            (self.num_samples, 3, max_h, max_w), dtype=torch.uint8, device=device
-        )
-        self.heights = torch.zeros(self.num_samples, dtype=torch.int32, device="cpu")
-        self.widths = torch.zeros(self.num_samples, dtype=torch.int32, device="cpu")
-
-        # Copy images into the padded GPU tensor
-        for i, (img_tensor, h, w) in enumerate(pil_images):
-            self.images[i, :, :h, :w] = img_tensor
-            self.heights[i] = h
-            self.widths[i] = w
 
         # Store labels and concepts on GPU
         self.labels = torch.tensor(labels, dtype=torch.long, device=device)
         self.concepts = torch.tensor(np.stack(concepts), dtype=torch.float32, device=device)
-
-        # Free the intermediate list
-        del pil_images
 
         mem_mb = self.images.element_size() * self.images.nelement() / (1024 * 1024)
         print(f"  GPU preload complete: {mem_mb:.0f} MB for images, "
@@ -82,19 +72,9 @@ class CUB_GPU_Dataset:
     def __len__(self):
         return self.num_samples
 
-    def get_transformed_sample(self, idx):
-        """Get a single sample with transforms applied on GPU."""
-        h = self.heights[idx].item()
-        w = self.widths[idx].item()
-        # Extract unpadded image (already on GPU)
-        img = self.images[idx, :, :h, :w]
-        # Apply v2 transforms (runs on GPU since img is a CUDA tensor)
-        img = self.transform(img)
-        return img
-
     def get_batch(self, indices):
         """
-        Get a batch of transformed samples.
+        Get a batch with transforms applied to the full batch tensor at once.
 
         Args:
             indices: 1D tensor of sample indices
@@ -102,15 +82,15 @@ class CUB_GPU_Dataset:
         Returns:
             dict with keys: img_code, labels, features, concepts
         """
-        batch_imgs = []
-        for idx in indices:
-            idx_val = idx.item()
-            batch_imgs.append(self.get_transformed_sample(idx_val))
+        # Single GPU index operation: (B, 3, 500, 500) uint8
+        batch_imgs = self.images[indices]
+        # Apply v2 transforms to entire batch at once — no Python loop
+        batch_imgs = self.transform(batch_imgs)
 
         return {
             "img_code": indices,
             "labels": self.labels[indices],
-            "features": torch.stack(batch_imgs),
+            "features": batch_imgs,
             "concepts": self.concepts[indices],
         }
 
