@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader
 
 from datasets.synthetic_dataset import get_synthetic_datasets
 from datasets.CUB_dataset import get_CUB_dataloaders
+from datasets.CUB_gpu_dataset import get_CUB_gpu_dataloaders, GPUBatchIterator
 from datasets.cifar10_dataset import get_CIFAR10_CBM_dataloader
 from datasets.cifar100_dataset import get_CIFAR100_CBM_dataloader
 from utils.utils import numerical_stability_check
@@ -41,6 +42,9 @@ def get_data(config_base, config, gen):
     else:
         pass
 
+    # Check if GPU preloading is requested
+    gpu_preload = config_base.get("gpu_preload", False)
+
     if config.dataset == "synthetic":
         print("SYNTHETIC DATASET")
         type = None
@@ -60,6 +64,31 @@ def get_data(config_base, config, gen):
             type=type,
             seed=config_base.seed,
         )
+    elif config.dataset == "CUB" and gpu_preload:
+        print("CUB DATASET (GPU PRELOAD)")
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        train_dataset, val_dataset, test_dataset = get_CUB_gpu_dataloaders(config, device)
+
+        config = config_base
+        train_loader = GPUBatchIterator(
+            train_dataset,
+            batch_size=config.model.train_batch_size,
+            shuffle=True,
+            drop_last=True,
+            generator=gen,
+        )
+        val_loader = GPUBatchIterator(
+            val_dataset,
+            batch_size=config.model.val_batch_size,
+            shuffle=True,
+            generator=gen,
+        )
+        test_loader = GPUBatchIterator(
+            test_dataset,
+            batch_size=config.model.val_batch_size,
+            shuffle=False,
+        )
+        return train_loader, val_loader, test_loader
     elif config.dataset == "CUB":
         print("CUB DATASET")
         trainset, validset, testset = get_CUB_dataloaders(

@@ -5,6 +5,7 @@ seed: 0 # Random seed
 workers: 2 # Number of workers for data loading
 save_model: False # Whether to save the model. Set to True for inspecting models post training [True, False]
 train_only: False # Whether to train the model only and exit before performing interventions [True, False]
+gpu_preload: False # Whether to preload entire dataset to GPU and use v2 transforms on-device [True, False]
 
 logging:
   project: 'SCBM' # Name of the wandb project
