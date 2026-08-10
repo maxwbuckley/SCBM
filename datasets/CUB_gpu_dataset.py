@@ -116,6 +116,10 @@ class GPUBatchIterator:
             indices = torch.randperm(n, generator=self.generator)
         else:
             indices = torch.arange(n)
+        # Move the whole permutation to the device once per epoch. Slicing it
+        # per batch then stays on-device; leaving it on the host would make
+        # every self.images[indices] gather a blocking H2D copy plus a sync.
+        indices = indices.to(self.dataset.device, non_blocking=True)
 
         # Yield batches
         for start in range(0, n, self.batch_size):

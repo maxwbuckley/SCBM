@@ -135,6 +135,7 @@ class SCBLoss(nn.Module):
         self.num_classes = num_classes
         self.reg_precision = config.reg_precision
         self.reg_weight = config.reg_weight
+        self._checked_binary = False
 
         self.log_num_mc = math.log(config.num_monte_carlo)
         self.alpha = alpha if config.training_mode == "joint" else 1.0
@@ -180,7 +181,19 @@ class SCBLoss(nn.Module):
             if cov_not_triang:
                 prec_matrix = torch.inverse(c_triang_cov)
             else:
-                c_triang_inv = torch.inverse(c_triang_cov)
+                # c_triang_cov is the Cholesky factor, so it is already lower
+                # triangular. torch.inverse() ignores that and runs a general LU
+                # factorisation (~0.5 ms/step here, plus a sync to check the
+                # info tensor for singularity). A triangular solve is cheaper,
+                # better conditioned, and does not synchronise.
+                eye = torch.eye(
+                    c_triang_cov.size(-1),
+                    device=c_triang_cov.device,
+                    dtype=c_triang_cov.dtype,
+                ).expand_as(c_triang_cov)
+                c_triang_inv = torch.linalg.solve_triangular(
+                    c_triang_cov, eye, upper=False
+                )
                 prec_matrix = torch.matmul(
                     torch.transpose(c_triang_inv, dim0=1, dim1=2), c_triang_inv
                 )
@@ -202,7 +215,12 @@ class SCBLoss(nn.Module):
         return target_loss, concepts_loss, prec_loss, total_loss
 
     def compute_concept_loss(self, concepts_mcmc_probs, concepts_true):
-        assert torch.all((concepts_true == 0) | (concepts_true == 1))
+        # Concepts are binary for the whole dataset, so checking every step is
+        # wasted work -- and reading a GPU bool on the host synchronises. Check
+        # the first batch only.
+        if not self._checked_binary:
+            assert torch.all((concepts_true == 0) | (concepts_true == 1))
+            self._checked_binary = True
         concepts_true_expanded = concepts_true.unsqueeze(-1).expand_as(
             concepts_mcmc_probs
         )

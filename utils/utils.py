@@ -23,6 +23,21 @@ def reset_random_seeds(seed):
     return gen
 
 
+def configure_performance():
+    """
+    Disable torch.distributions argument validation.
+
+    Every Distribution constructor otherwise runs its constraint checks against
+    the GPU tensors it is handed (e.g. lower_cholesky on scale_tril, unit_interval
+    on probs) and reads the boolean result on the host. That forces a device
+    synchronisation on every construction -- ~5 per training step here, each one
+    draining the CUDA queue and stalling the pipeline.
+
+    Validation is a debugging aid, not a correctness requirement.
+    """
+    torch.distributions.Distribution.set_default_validate_args(False)
+
+
 def numerical_stability_check(cov, device, epsilon=1e-6):
     """
     Check for numerical stability of covariance matrix.

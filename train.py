@@ -30,7 +30,7 @@ from utils.training import (
     validate_one_epoch_scbm,
     Custom_Metrics,
 )
-from utils.utils import reset_random_seeds
+from utils.utils import configure_performance, reset_random_seeds
 
 
 def train(config):
@@ -52,6 +52,7 @@ def train(config):
 
     # Reproducibility
     gen = reset_random_seeds(config.seed)
+    configure_performance()
 
     # Setting device on GPU if available, else CPU
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

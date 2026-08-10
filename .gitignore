@@ -166,3 +166,11 @@ experiments/
 outputs/
 .vscode/
 multirun/
+# Profiling artifacts
+profiles/
+*.nsys-rep
+*.sqlite
+*.ncu-rep
+
+# Local dataset copy (2.3 GB)
+datasets/CUB/

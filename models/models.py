@@ -220,9 +220,14 @@ class SCBM(nn.Module):
             c_triang_cov = torch.zeros(
                 (c_sigma.shape[0], self.num_concepts, self.num_concepts),
                 device=c_sigma.device,
+                dtype=c_sigma.dtype,
             )
             c_triang_cov[:, self._tril_rows, self._tril_cols] = c_sigma
-            c_triang_cov[:, range(self.num_concepts), range(self.num_concepts)] = (
+            # .diagonal() is a strided view, so this writes the diagonal without
+            # building host-side index tensors. Indexing with range() instead
+            # would materialise two CPU lists and copy them to the device on
+            # every forward pass, synchronising each time.
+            c_triang_cov.diagonal(dim1=-2, dim2=-1).copy_(
                 F.softplus(c_sigma[:, self._tril_diag_idx]) + 1e-6
             )
 

@@ -433,9 +433,11 @@ def create_optimizer(config, model):
     ]
 
     if config.optimizer == "sgd":
-        return torch.optim.SGD(optim_params)
+        return torch.optim.SGD(optim_params, fused=torch.cuda.is_available())
     elif config.optimizer == "adam":
-        return torch.optim.Adam(optim_params)
+        # fused=True runs the whole update in a single multi-tensor kernel
+        # instead of one launch per parameter group element.
+        return torch.optim.Adam(optim_params, fused=torch.cuda.is_available())
 
 
 class Custom_Metrics(Metric):
