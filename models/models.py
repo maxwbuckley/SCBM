@@ -146,6 +146,17 @@ class SCBM(nn.Module):
                 0.01  # To prevent exploding precision matrix at initialization
             )
 
+        # Precompute static indices for the lower-triangular covariance matrix
+        # to avoid boolean indexing (dynamic shapes) that causes torch.compile graph breaks
+        rows, cols = torch.tril_indices(
+            row=self.num_concepts, col=self.num_concepts, offset=0
+        )
+        self.register_buffer("_tril_rows", rows)
+        self.register_buffer("_tril_cols", cols)
+        # Integer indices of diagonal entries within the flattened lower-triangle vector
+        diag_idx = (rows == cols).nonzero(as_tuple=True)[0]
+        self.register_buffer("_tril_diag_idx", diag_idx)
+
         # Assume binary concepts
         self.act_c = nn.Sigmoid()
 
@@ -210,13 +221,9 @@ class SCBM(nn.Module):
                 (c_sigma.shape[0], self.num_concepts, self.num_concepts),
                 device=c_sigma.device,
             )
-            rows, cols = torch.tril_indices(
-                row=self.num_concepts, col=self.num_concepts, offset=0
-            )
-            diag_idx = rows == cols
-            c_triang_cov[:, rows, cols] = c_sigma
+            c_triang_cov[:, self._tril_rows, self._tril_cols] = c_sigma
             c_triang_cov[:, range(self.num_concepts), range(self.num_concepts)] = (
-                F.softplus(c_sigma[:, diag_idx]) + 1e-6
+                F.softplus(c_sigma[:, self._tril_diag_idx]) + 1e-6
             )
 
         # Sample from predicted normal distribution

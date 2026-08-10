@@ -67,7 +67,7 @@ def get_data(config_base, config, gen):
     elif config.dataset == "CUB" and gpu_preload:
         print("CUB DATASET (GPU PRELOAD)")
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        train_dataset, val_dataset, test_dataset = get_CUB_gpu_dataloaders(config, device)
+        train_dataset, val_dataset, test_imgs = get_CUB_gpu_dataloaders(config, device)
 
         config = config_base
         train_loader = GPUBatchIterator(
@@ -83,10 +83,23 @@ def get_data(config_base, config, gen):
             shuffle=True,
             generator=gen,
         )
-        test_loader = GPUBatchIterator(
-            test_dataset,
+        # Test set uses regular CPU DataLoader — only evaluated once,
+        # not worth the VRAM cost of preloading.
+        from datasets.CUB_dataset import CUB_DatasetGenerator
+        import torchvision.transforms as transforms
+        resol = 299
+        test_transform = transforms.Compose([
+            transforms.CenterCrop(resol),
+            transforms.Resize(size=(224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+        testset = CUB_DatasetGenerator(test_imgs, transform=test_transform, cache=False)
+        test_loader = DataLoader(
+            testset,
             batch_size=config.model.val_batch_size,
-            shuffle=False,
+            num_workers=config.workers,
+            generator=gen,
         )
         return train_loader, val_loader, test_loader
     elif config.dataset == "CUB":

@@ -188,10 +188,14 @@ def train_test_split_CUB(root_dir):
 
 def get_CUB_gpu_dataloaders(config, device):
     """
-    Returns GPU-resident CUB datasets wrapped in GPUBatchIterators.
+    Returns GPU-resident CUB datasets for train/val, and raw test pkl data.
+
+    Only train and val are preloaded to GPU — test is evaluated once, so it
+    uses the regular CPU DataLoader to avoid wasting VRAM.
 
     Returns:
-        tuple of (train_loader, val_loader, test_loader) as GPUBatchIterators
+        tuple of (train_dataset, val_dataset, test_imgs)
+        where train/val are CUB_GPU_Dataset and test_imgs is raw pkl data.
     """
     print("Loading CUB dataset to GPU...")
     train_imgs, val_imgs, test_imgs = train_test_split_CUB(root_dir=config.data_path)
@@ -203,7 +207,5 @@ def get_CUB_gpu_dataloaders(config, device):
     train_dataset = CUB_GPU_Dataset(train_imgs, train_transform, device)
     print("  Preloading validation set...")
     val_dataset = CUB_GPU_Dataset(val_imgs, test_transform, device)
-    print("  Preloading test set...")
-    test_dataset = CUB_GPU_Dataset(test_imgs, test_transform, device)
 
-    return train_dataset, val_dataset, test_dataset
+    return train_dataset, val_dataset, test_imgs
