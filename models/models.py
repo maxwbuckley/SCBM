@@ -12,6 +12,7 @@ from torchvision import models
 
 from models.networks import FCNNEncoder
 from utils.training import freeze_module, unfreeze_module
+from utils.utils import perf_option
 
 
 def create_model(config):
@@ -26,6 +27,8 @@ def create_model(config):
         model = CBM(config)
     elif config.model.model == "scbm":
         model = SCBM(config)
+    if perf_option(config, "channels_last", False):
+        model = model.to(memory_format=torch.channels_last)
     if config.model.compile:
         model = torch.compile(model)
     return model
@@ -81,6 +84,7 @@ class SCBM(nn.Module):
         else:
             self.num_epochs = config_model.t_epochs
         self.cov_type = config_model.cov_type
+        self.channels_last = bool(perf_option(config, "channels_last", False))
 
         self.init_temp = 1.0
         self.final_temp = 0.5
@@ -202,6 +206,10 @@ class SCBM(nn.Module):
         """
 
         # Get intermediate representations
+        if self.channels_last and x.dim() == 4:
+            # No-op if the input is already NHWC. Done here rather than at each
+            # call site so train, validation and intervention all get it.
+            x = x.contiguous(memory_format=torch.channels_last)
         intermediate = self.encoder(x)
 
         # Get mu and cholesky decomposition of covariance
@@ -369,6 +377,7 @@ class CBM(nn.Module):
                 self.num_epochs = config_model.t_epochs
         elif self.concept_learning == "embedding":
             self.CEM_embedding = config_model.embedding_size
+        self.channels_last = bool(perf_option(config, "channels_last", False))
 
         # Architectures
         # Encoder h(.)
@@ -498,6 +507,8 @@ class CBM(nn.Module):
         """
 
         # Get intermediate representations
+        if self.channels_last and x.dim() == 4:
+            x = x.contiguous(memory_format=torch.channels_last)
         intermediate = self.encoder(x)
 
         # Get concept predictions

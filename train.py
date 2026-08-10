@@ -52,7 +52,7 @@ def train(config):
 
     # Reproducibility
     gen = reset_random_seeds(config.seed)
-    configure_performance()
+    configure_performance(config)  # must follow reset_random_seeds, which it overrides
 
     # Setting device on GPU if available, else CPU
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

@@ -34,7 +34,7 @@ from models.losses import create_loss
 from models.models import create_model
 from utils.data import get_data
 from utils.training import create_optimizer
-from utils.utils import configure_performance, reset_random_seeds
+from utils.utils import configure_performance, perf_option, reset_random_seeds
 
 WARMUP_STEPS = 20
 MEASURE_STEPS = 30
@@ -211,9 +211,24 @@ def kernel_table(batches, model, optimizer, loss_fn, device, trace_path):
     except (KeyError, AssertionError):
         table = prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=30)
 
+    # Layout-conversion tax: cuDNN's fast conv kernels are NHWC, so an NCHW
+    # model pays a transpose in and out of every convolution.
+    ev = prof.key_averages()
+    total = sum(e.self_device_time_total for e in ev)
+    transpose = sum(
+        e.self_device_time_total
+        for e in ev
+        if "nchwToNhwc" in e.key or "nhwcToNchw" in e.key
+    )
+    n_transpose = sum(
+        e.count for e in ev if "nchwToNhwc" in e.key or "nhwcToNchw" in e.key
+    )
+
     print(f"\n{'=' * 78}")
     print("3. TOP KERNELS BY SELF GPU TIME  (10 steps)")
     print(f"{'=' * 78}")
+    print(f"  layout transposes: {transpose / 1000:.2f} ms over {n_transpose} launches "
+          f"({100 * transpose / total:.1f}% of GPU time)")
     print(table)
 
     prof.export_chrome_trace(trace_path)
@@ -226,8 +241,6 @@ def kernel_table(batches, model, optimizer, loss_fn, device, trace_path):
 
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 def main(config: DictConfig):
-    reset_random_seeds(config.seed)
-    configure_performance()
     device = torch.device("cuda")
 
     print(f"Device: {torch.cuda.get_device_name(0)}")
@@ -236,6 +249,13 @@ def main(config: DictConfig):
           f"mc={config.model.num_monte_carlo}")
 
     gen = reset_random_seeds(config.seed)
+    configure_performance(config)  # must follow reset_random_seeds, which it overrides
+
+    print(f"channels_last={perf_option(config, 'channels_last', False)}  "
+          f"cudnn.benchmark={torch.backends.cudnn.benchmark}  "
+          f"deterministic={torch.are_deterministic_algorithms_enabled()}  "
+          f"fill_uninit={torch.utils.deterministic.fill_uninitialized_memory}")
+
     train_loader, _, _ = get_data(config, config.data, gen)
     model = create_model(config).to(device)
     loss_fn = create_loss(config)

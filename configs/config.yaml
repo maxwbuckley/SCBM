@@ -2,10 +2,29 @@ experiment_name: 'experiments' # Name of the experiment
 experiment_dir: './experiments/'  # Directory to potentially save the model to
 
 seed: 0 # Random seed
-workers: 2 # Number of workers for data loading
+workers: 12 # Number of workers for data loading
 save_model: False # Whether to save the model. Set to True for inspecting models post training [True, False]
 train_only: False # Whether to train the model only and exit before performing interventions [True, False]
-gpu_preload: False # Whether to preload entire dataset to GPU and use v2 transforms on-device [True, False]
+gpu_preload: True # Whether to preload entire dataset to GPU and use v2 transforms on-device [True, False]
+
+# --------------------------
+#        Performance
+# --------------------------
+# TODO(Max): clean this up once the optimization work settles. Decide which of
+# these should just be unconditional rather than configurable, and trim the
+# explanatory comments here and in utils/utils.py, models/models.py and
+# models/losses.py -- they are written for someone following the profiling
+# session and are far more verbose than the rest of the codebase.
+#
+# Measured on an RTX 5090, CUB, batch 64, gpu_preload=True. Throughput with all
+# of these off is ~38-41 it/s; with the defaults below it is ~47.7 it/s, and
+# bit-exact reproducibility is retained. See profile_train.py to re-measure.
+performance:
+  channels_last: True # Hold conv weights and activations as NHWC. cuDNN's fast convolution kernels are NHWC, so an NCHW model pays a transpose in and out of every conv (~68 launches/step here). No effect on non-conv encoders [True, False]
+  cudnn_benchmark: False # Time every candidate conv algorithm on first sight of each input shape and cache the winner, instead of picking by heuristic. Requires static shapes - the train loader uses drop_last=True, so they are. Off by default because the one-time autotune costs ~11 s here while the steady-state gain is only ~0.04 s/epoch, so it does not break even until ~270 epochs [True, False]
+  deterministic: True # Bit-exact reproducibility. Restricts cuDNN to deterministic algorithms, which notably excludes the fast atomics-based weight-gradient kernels. Costs ~5% here [True, False]
+  fill_uninitialized_memory: False # Debugging aid that torch enables as a side effect of deterministic mode: zero-fills every torch.empty() allocation so that reading uninitialised memory cannot introduce nondeterminism. Independent of algorithm choice, and the single most expensive item in the step when on (~1.2 ms/step) [True, False]
+  validate_distributions: False # torch.distributions argument checking. Every Distribution constructor otherwise validates its arguments on the GPU and reads the result on the host, forcing ~5 synchronisations per step [True, False]
 
 logging:
   project: 'SCBM' # Name of the wandb project

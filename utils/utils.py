@@ -23,19 +23,43 @@ def reset_random_seeds(seed):
     return gen
 
 
-def configure_performance():
+def perf_option(config, name, default):
     """
-    Disable torch.distributions argument validation.
-
-    Every Distribution constructor otherwise runs its constraint checks against
-    the GPU tensors it is handed (e.g. lower_cholesky on scale_tril, unit_interval
-    on probs) and reads the boolean result on the host. That forces a device
-    synchronisation on every construction -- ~5 per training step here, each one
-    draining the CUDA queue and stalling the pipeline.
-
-    Validation is a debugging aid, not a correctness requirement.
+    Read a flag from the config's `performance` block, tolerating its absence.
     """
-    torch.distributions.Distribution.set_default_validate_args(False)
+    perf = config.get("performance", None) if config is not None else None
+    if perf is None:
+        return default
+    value = perf.get(name, default)
+    return default if value is None else value
+
+
+def configure_performance(config=None):
+    """
+    Apply the `performance` block of the config to the torch backends.
+
+    TODO(Max): see configs/config.yaml -- trim these comments and decide which
+    flags are worth keeping configurable.
+
+    Must be called *after* reset_random_seeds(), which unconditionally enables
+    determinism and disables cuDNN autotuning; these settings override it.
+
+    See configs/config.yaml for what each flag costs. The one that surprises
+    people is fill_uninitialized_memory: torch turns it on as a side effect of
+    use_deterministic_algorithms(True), it is only a debugging aid, and it is
+    more expensive than any single kernel in this model's training step.
+    """
+    if not perf_option(config, "validate_distributions", False):
+        torch.distributions.Distribution.set_default_validate_args(False)
+
+    deterministic = perf_option(config, "deterministic", True)
+    torch.use_deterministic_algorithms(deterministic)
+    torch.backends.cudnn.deterministic = deterministic
+
+    torch.backends.cudnn.benchmark = perf_option(config, "cudnn_benchmark", False)
+    torch.utils.deterministic.fill_uninitialized_memory = perf_option(
+        config, "fill_uninitialized_memory", False
+    )
 
 
 def numerical_stability_check(cov, device, epsilon=1e-6):
