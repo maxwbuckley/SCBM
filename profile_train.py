@@ -166,8 +166,13 @@ def time_regions(batches, model, optimizer, loss_fn, device):
 
     torch.cuda.synchronize()
     t0 = time.perf_counter()
-    for i, batch in enumerate(itertools.islice(batches, MEASURE_STEPS)):
+    # next(batches) must sit INSIDE the event window: with gpu_preload the
+    # dataset applies its transforms on-device, so fetching a batch is real GPU
+    # work. Fetching it in the for-statement instead puts that work in wall
+    # time but outside the events, where it masquerades as idle.
+    for i in range(MEASURE_STEPS):
         starts[i].record()
+        batch = next(batches)
         train_step(batch, model, optimizer, loss_fn, device, epoch=0)
         ends[i].record()
     torch.cuda.synchronize()
